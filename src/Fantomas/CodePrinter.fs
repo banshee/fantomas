@@ -19,13 +19,15 @@ and genSigFile(ParsedSigFileInput(hs, mns)) =
 and genParsedHashDirective(ParsedHashDirective(s1, s2)) =
     !- "#" -- s1 +> sepSpace +> ifElse (s2 = "") sepNone (!- (sprintf "\"%O\"" s2))
 
-and genModuleOrNamespace(ModuleOrNamespace(ats, px, ao, s, mds, isModule, r)) =
-    ifElse (s = "Tmp") sepNone (genCommentsAt r +> genPreXmlDoc px)
-    +> colPost sepNln sepNln ats genAttribute
-    // Checking for Tmp is a bit fragile
-    +> ifElse (s = "Tmp") sepNone (ifElse isModule (!- "module ") (!- "namespace ")
-            +> opt sepSpace ao genAccess +> ifElse (s = "") (!- "global") (!- s) +> rep 2 sepNln)
-    +> genModuleDeclList mds
+and genModuleOrNamespace mn =
+    let rec genModuleOrNamespace(ModuleOrNamespace(ats, px, ao, s, mds, isModule, r)) =
+        ifElse (s = "Tmp") sepNone (genCommentsAt r +> genPreXmlDoc px)
+        +> colPost sepNln sepNln ats genAttribute
+        // Checking for Tmp is a bit fragile
+        +> ifElse (s = "Tmp") sepNone (ifElse isModule (!- "module ") (!- "namespace ")
+                +> opt sepSpace ao genAccess +> ifElse (s = "") (!- "global") (!- s) +> rep 2 sepNln)
+        +> genModuleDeclList mds
+    attachDirectives genModuleOrNamespace mn
 
 and genSigModuleOrNamespace(SigModuleOrNamespace(ats, px, ao, s, mds, isModule, r)) =
     ifElse (s = "Tmp") sepNone (genCommentsAt r +> genPreXmlDoc px)
@@ -85,7 +87,7 @@ and genModuleDecl md =
             genTypeDefn true t +> colPre (rep 2 sepNln) (rep 2 sepNln) ts (genTypeDefn false)
         | md ->
             failwithf "Unexpected module declaration: %O" md
-    genComments md +> genModuleDecl md
+    attachDirectives (fun md -> genComments md +> genModuleDecl md) md
 
 and genSigModuleDecl md = 
     let rec genSigModuleDec = function
@@ -120,12 +122,6 @@ and genAttribute(Attribute(s, e, _)) =
     | ConstExpr(Const "()") -> !- (sprintf "[<%s>]" s)
     | e -> !- "[<" -- s +> genExpr e -- ">]"
     
-/// Only print out XmlDoc if there is no annotated comments
-and genPreXmlDoc(PreXmlDoc lines) ctx = 
-    if ctx.Comments.Count = 0 then
-        colPost sepNln sepNln lines (sprintf "///%s" >> (!-)) ctx
-    else sepNone ctx
-
 // These inline functions have to be defined before their uses
 
 and inline autoBreakNln e = 
@@ -275,160 +271,162 @@ and inline genRecordFieldName(RecordFieldName(s, eo)) =
     opt sepNone eo (fun e -> !- s +> sepEq +> autoBreakNln e)
 
 and genExpr expr = 
-    match expr with
-    | Paren e -> sepOpenT +> genExpr e +> sepCloseT
-    | SingleExpr(kind, e) -> str kind +> genExpr e
-    | ConstExpr(c) -> genConst c
-    | NullExpr -> !- "null"
-    // Not sure about the role of e1
-    | Quote(_, e2, isRaw) ->         
-        let e = genExpr e2
-        ifElse isRaw (!- "<@@ " +> e -- " @@>") (!- "<@ " +> e -- " @>")
+    let rec genExpr expr =
+        match expr with
+        | Paren e -> sepOpenT +> genExpr e +> sepCloseT
+        | SingleExpr(kind, e) -> str kind +> genExpr e
+        | ConstExpr(c) -> genConst c
+        | NullExpr -> !- "null"
+        // Not sure about the role of e1
+        | Quote(_, e2, isRaw) ->         
+            let e = genExpr e2
+            ifElse isRaw (!- "<@@ " +> e -- " @@>") (!- "<@ " +> e -- " @>")
 
-    | TypedExpr(TypeTest, e, t) -> genExpr e -- " :? " +> genType t
-    | TypedExpr(New, e, t) -> 
-        genComments expr 
-        -- "new " +> genType t +> ifElse (hasParenthesis e) sepBeforeArg sepSpace +> genExpr e
+        | TypedExpr(TypeTest, e, t) -> genExpr e -- " :? " +> genType t
+        | TypedExpr(New, e, t) -> 
+            genComments expr 
+            -- "new " +> genType t +> ifElse (hasParenthesis e) sepBeforeArg sepSpace +> genExpr e
 
-    | TypedExpr(Downcast, e, t) -> genExpr e -- " :?> " +> genType t
-    | TypedExpr(Upcast, e, t) -> genExpr e -- " :> " +> genType t
-    | TypedExpr(Typed, e, t) -> genExpr e +> sepColon +> genType t
-    | Tuple es -> atCurrentColumn (colAutoNlnSkip0 sepComma es genExpr)
-    | ArrayOrList(isArray, xs) -> 
-        ifElse isArray (sepOpenA +> atCurrentColumn (colAutoNlnSkip0 sepSemi xs genExpr) +> sepCloseA) 
-            (sepOpenL +> atCurrentColumn (colAutoNlnSkip0 sepSemi xs genExpr) +> sepCloseL)
+        | TypedExpr(Downcast, e, t) -> genExpr e -- " :?> " +> genType t
+        | TypedExpr(Upcast, e, t) -> genExpr e -- " :> " +> genType t
+        | TypedExpr(Typed, e, t) -> genExpr e +> sepColon +> genType t
+        | Tuple es -> atCurrentColumn (colAutoNlnSkip0 sepComma es genExpr)
+        | ArrayOrList(isArray, xs) -> 
+            ifElse isArray (sepOpenA +> atCurrentColumn (colAutoNlnSkip0 sepSemi xs genExpr) +> sepCloseA) 
+                (sepOpenL +> atCurrentColumn (colAutoNlnSkip0 sepSemi xs genExpr) +> sepCloseL)
 
-    | Record(xs, eo) -> 
-        sepOpenS +> opt (!- " with ") eo genExpr
-        +> atCurrentColumn (col sepSemiNln xs genRecordFieldName)
-        +> sepCloseS
+        | Record(xs, eo) -> 
+            sepOpenS +> opt (!- " with ") eo genExpr
+            +> atCurrentColumn (col sepSemiNln xs genRecordFieldName)
+            +> sepCloseS
 
-    | ObjExpr(t, eio, bd, ims) ->
-        // Check the role of the second part of eio
-        let param = opt sepNone (Option.map fst eio) genExpr
-        sepOpenS +> 
-        atCurrentColumn (genComments expr -- "new " +> genType t +> param -- " with" 
-            +> indent +> sepNln +> genMemberBindingList true bd +> unindent
-            +> colPre sepNln sepNln ims genInterfaceImpl) +> sepCloseS
+        | ObjExpr(t, eio, bd, ims) ->
+            // Check the role of the second part of eio
+            let param = opt sepNone (Option.map fst eio) genExpr
+            sepOpenS +> 
+            atCurrentColumn (genComments expr -- "new " +> genType t +> param -- " with" 
+                +> indent +> sepNln +> genMemberBindingList true bd +> unindent
+                +> colPre sepNln sepNln ims genInterfaceImpl) +> sepCloseS
 
-    | While(e1, e2) -> 
-        atCurrentColumn (genComments expr -- "while " +> genExpr e1 -- " do" 
-        +> indent +> sepNln +> genExpr e2 +> unindent)
+        | While(e1, e2) -> 
+            atCurrentColumn (genComments expr -- "while " +> genExpr e1 -- " do" 
+            +> indent +> sepNln +> genExpr e2 +> unindent)
 
-    | For(s, e1, e2, e3, isUp) ->
-        atCurrentColumn (genComments expr -- (sprintf "for %s = " s) +> genExpr e1 
-            +> ifElse isUp (!- " to ") (!- " downto ") +> genExpr e2 -- " do" 
-            +> indent +> sepNln +> genExpr e3 +> unindent)
+        | For(s, e1, e2, e3, isUp) ->
+            atCurrentColumn (genComments expr -- (sprintf "for %s = " s) +> genExpr e1 
+                +> ifElse isUp (!- " to ") (!- " downto ") +> genExpr e2 -- " do" 
+                +> indent +> sepNln +> genExpr e3 +> unindent)
 
-    // Handle the form 'for i in e1 -> e2'
-    | ForEach(p, e1, e2, isArrow) ->
-        atCurrentColumn (genComments expr -- "for " +> genPat p -- " in " +> genExpr e1 
-            +> ifElse isArrow (sepArrow +> autoBreakNln e2) (!- " do" +> indent +> sepNln +> genExpr e2 +> unindent))
+        // Handle the form 'for i in e1 -> e2'
+        | ForEach(p, e1, e2, isArrow) ->
+            atCurrentColumn (genComments expr -- "for " +> genPat p -- " in " +> genExpr e1 
+                +> ifElse isArrow (sepArrow +> autoBreakNln e2) (!- " do" +> indent +> sepNln +> genExpr e2 +> unindent))
 
-    | CompExpr(isArrayOrList, e) ->
-        ifElse isArrayOrList (genExpr e) (autoBreakNln e) 
-    | ArrayOrListOfSeqExpr(isArray, e) -> 
-        ifElse isArray (sepOpenA +> genExpr e +> sepCloseA) (sepOpenL +> genExpr e +> sepCloseL)
-    | JoinIn(e1, e2) -> genExpr e1 -- " in " +> genExpr e2
-    | DesugaredLambda(cps, e) -> 
-        !- "fun " +>  col sepSpace cps genComplexPats +> sepArrow +> autoBreakNln e        
-    | Lambda(e, sps) -> 
-        genComments expr -- "fun " +> col sepSpace sps genSimplePats +> sepArrow +> autoBreakNln e
-    | MatchLambda(sp, _) -> atCurrentColumn (genComments expr -- "function " +> colPre sepNln sepNln sp genClause)
-    | Match(e, cs) -> 
-        atCurrentColumn (genComments expr -- "match " +> genExpr e -- " with" +> colPre sepNln sepNln cs genClause)
-    | CompApp(s, e) ->
-        !- s +> sepSpace +> sepOpenS +> genExpr e +> sepCloseS
-    | App(Var ".. ..", [e1; e2; e3]) -> genExpr e1 -- ".." +> genExpr e2 -- ".." +> genExpr e3
-    // Separate two prefix ops by spaces
-    | PrefixApp(s1, PrefixApp(s2, e)) -> !- (sprintf "%s %s" s1 s2) +> genExpr e
-    | PrefixApp(s, e) -> !- s  +> genExpr e
-    // Handle spaces of infix application based on which category it belongs to
-    | InfixApps(e, es) -> 
-        /// Only put |> on the same line in a very trivial expression
-        let hasNewLine = multiline e || not (List.atmostOne es)
-        atCurrentColumn (genExpr e +> genInfixApps hasNewLine es)
+        | CompExpr(isArrayOrList, e) ->
+            ifElse isArrayOrList (genExpr e) (autoBreakNln e) 
+        | ArrayOrListOfSeqExpr(isArray, e) -> 
+            ifElse isArray (sepOpenA +> genExpr e +> sepCloseA) (sepOpenL +> genExpr e +> sepCloseL)
+        | JoinIn(e1, e2) -> genExpr e1 -- " in " +> genExpr e2
+        | DesugaredLambda(cps, e) -> 
+            !- "fun " +>  col sepSpace cps genComplexPats +> sepArrow +> autoBreakNln e        
+        | Lambda(e, sps) -> 
+            genComments expr -- "fun " +> col sepSpace sps genSimplePats +> sepArrow +> autoBreakNln e
+        | MatchLambda(sp, _) -> atCurrentColumn (genComments expr -- "function " +> colPre sepNln sepNln sp genClause)
+        | Match(e, cs) -> 
+            atCurrentColumn (genComments expr -- "match " +> genExpr e -- " with" +> colPre sepNln sepNln cs genClause)
+        | CompApp(s, e) ->
+            !- s +> sepSpace +> sepOpenS +> genExpr e +> sepCloseS
+        | App(Var ".. ..", [e1; e2; e3]) -> genExpr e1 -- ".." +> genExpr e2 -- ".." +> genExpr e3
+        // Separate two prefix ops by spaces
+        | PrefixApp(s1, PrefixApp(s2, e)) -> !- (sprintf "%s %s" s1 s2) +> genExpr e
+        | PrefixApp(s, e) -> !- s  +> genExpr e
+        // Handle spaces of infix application based on which category it belongs to
+        | InfixApps(e, es) -> 
+            /// Only put |> on the same line in a very trivial expression
+            let hasNewLine = multiline e || not (List.atmostOne es)
+            atCurrentColumn (genExpr e +> genInfixApps hasNewLine es)
 
-    // This filters a few long examples of App
-    | DotGetAppSpecial(s, es) ->
-        !- s 
-        +> atCurrentColumn 
-             (colAutoNlnSkip0 sepNone es (fun (s, e) ->
-                                (!- (sprintf ".%s" s) 
-                                    +> ifElse (hasParenthesis e) sepBeforeArg sepSpace +> genExpr e)))
+        // This filters a few long examples of App
+        | DotGetAppSpecial(s, es) ->
+            !- s 
+            +> atCurrentColumn 
+                 (colAutoNlnSkip0 sepNone es (fun (s, e) ->
+                                    (!- (sprintf ".%s" s) 
+                                        +> ifElse (hasParenthesis e) sepBeforeArg sepSpace +> genExpr e)))
 
-    | DotGetApp(e, es) -> 
-        noNln (genExpr e)
-        +> indent 
-        +> (col sepNone es (fun (s, e) -> 
-                                autoNln (!- (sprintf ".%s" s) 
-                                    +> ifElse (hasParenthesis e) sepBeforeArg sepSpace +> genExpr e)))
-        +> unindent
+        | DotGetApp(e, es) -> 
+            noNln (genExpr e)
+            +> indent 
+            +> (col sepNone es (fun (s, e) -> 
+                                    autoNln (!- (sprintf ".%s" s) 
+                                        +> ifElse (hasParenthesis e) sepBeforeArg sepSpace +> genExpr e)))
+            +> unindent
 
-    // Unlike infix app, function application needs a level of indentation
-    | App(e1, [e2]) -> 
-        atCurrentColumn (genExpr e1 +> 
-            ifElse (hasParenthesis e2) sepBeforeArg sepSpace 
-            +> indent +> autoNln (genExpr e2) +> unindent)
+        // Unlike infix app, function application needs a level of indentation
+        | App(e1, [e2]) -> 
+            atCurrentColumn (genExpr e1 +> 
+                ifElse (hasParenthesis e2) sepBeforeArg sepSpace 
+                +> indent +> autoNln (genExpr e2) +> unindent)
 
-    // Always spacing in multiple arguments
-    | App(e, es) -> 
-        atCurrentColumn 
-            (genExpr e +> colPre sepSpace sepSpace es (fun e -> indent +> autoNln (genExpr e) +> unindent))
+        // Always spacing in multiple arguments
+        | App(e, es) -> 
+            atCurrentColumn 
+                (genExpr e +> colPre sepSpace sepSpace es (fun e -> indent +> autoNln (genExpr e) +> unindent))
 
-    | TypeApp(e, ts) -> genExpr e -- "<" +> col sepComma ts genType -- ">"
-    | LetOrUse(isRec, isUse, bs, e) ->
-        let prefix = 
-            if isUse then "use "
-            elif isRec then "let rec "
-            else "let "
+        | TypeApp(e, ts) -> genExpr e -- "<" +> col sepComma ts genType -- ">"
+        | LetOrUse(isRec, isUse, bs, e) ->
+            let prefix = 
+                if isUse then "use "
+                elif isRec then "let rec "
+                else "let "
 
-        match bs with
-        | b::bs ->
-            // and is applicable for use binding
-            atCurrentColumn (genComments expr +> genLetBinding true prefix b +> 
-                colPre sepNln sepNln bs (genLetBinding false "and ") +> sepNln +> genExpr e)
+            match bs with
+            | b::bs ->
+                // and is applicable for use binding
+                atCurrentColumn (genComments expr +> genLetBinding true prefix b +> 
+                    colPre sepNln sepNln bs (genLetBinding false "and ") +> sepNln +> genExpr e)
 
-        | _ -> atCurrentColumn (genComments expr +> col sepNln bs (genLetBinding true prefix) +> sepNln +> genExpr e)
+            | _ -> atCurrentColumn (genComments expr +> col sepNln bs (genLetBinding true prefix) +> sepNln +> genExpr e)
 
-    // Could customize a bit if e is single line
-    | TryWith(e, cs) ->  
-        atCurrentColumn (genComments expr -- "try " +> indent +> sepNln +> genExpr e +> unindent ++ "with" 
-            +> indentOnWith +> sepNln +> col sepNln cs genClause +> unindentOnWith)
+        // Could customize a bit if e is single line
+        | TryWith(e, cs) ->  
+            atCurrentColumn (genComments expr -- "try " +> indent +> sepNln +> genExpr e +> unindent ++ "with" 
+                +> indentOnWith +> sepNln +> col sepNln cs genClause +> unindentOnWith)
 
-    | TryFinally(e1, e2) -> 
-        atCurrentColumn (genComments expr -- "try " +> indent +> sepNln +> genExpr e1 +> unindent ++ "finally" 
-            +> indent +> sepNln +> genExpr e2 +> unindent)    
+        | TryFinally(e1, e2) -> 
+            atCurrentColumn (genComments expr -- "try " +> indent +> sepNln +> genExpr e1 +> unindent ++ "finally" 
+                +> indent +> sepNln +> genExpr e2 +> unindent)    
 
-    | SequentialSimple es -> atCurrentColumn (colAutoNlnSkip0 sepSemi es genExpr)
-    // It seems too annoying to use sepSemiNln
-    | Sequentials es -> 
-        atCurrentColumn (col sepNln es genExpr)
-    // A generalization of IfThenElse
-    | ElIf((e1,e2)::es, en) ->
-        atCurrentColumn (genComments expr -- "if " +> genExpr e1 
-            ++ "then " +> autoBreakNln e2
-            +> col sepNone es (fun (e1, e2) -> !+ "elif " +> genExpr e1 ++ "then " +> autoBreakNln e2)
-            ++ "else " +> autoBreakNln en)
+        | SequentialSimple es -> atCurrentColumn (colAutoNlnSkip0 sepSemi es genExpr)
+        // It seems too annoying to use sepSemiNln
+        | Sequentials es -> 
+            atCurrentColumn (col sepNln es genExpr)
+        // A generalization of IfThenElse
+        | ElIf((e1,e2)::es, en) ->
+            atCurrentColumn (genComments expr -- "if " +> genExpr e1 
+                ++ "then " +> autoBreakNln e2
+                +> col sepNone es (fun (e1, e2) -> !+ "elif " +> genExpr e1 ++ "then " +> autoBreakNln e2)
+                ++ "else " +> autoBreakNln en)
 
-    | IfThenElse(e1, e2, None) -> 
-        atCurrentColumn (genComments expr -- "if " +> genExpr e1 ++ "then " +> autoBreakNln e2)
-    // At this stage, all symbolic operators have been handled.
-    | OptVar(s, isOpt) -> ifElse isOpt (!- "?") sepNone -- s
-    | LongIdentSet(s, e) -> !- (sprintf "%s <- " s) +> genExpr e
-    | DotIndexedGet(e, es) -> genExpr e -- "." +> sepOpenL +> genIndexedVars es +> sepCloseL
-    | DotIndexedSet(e1, es, e2) -> genExpr e1 -- ".[" +> genIndexedVars es -- "] <- " +> genExpr e2
-    | DotGet(e, s) -> genExpr e -- sprintf ".%s" s
-    | DotSet(e1, s, e2) -> genExpr e1 -- sprintf ".%s <- " s +> genExpr e2
-    | TraitCall(tps, msg, e) -> 
-        sepOpenT +> genTyparList tps +> sepColon +> sepOpenT +> genMemberSig msg +> sepCloseT 
-        +> sepSpace +> genExpr e +> sepCloseT
+        | IfThenElse(e1, e2, None) -> 
+            atCurrentColumn (genComments expr -- "if " +> genExpr e1 ++ "then " +> autoBreakNln e2)
+        // At this stage, all symbolic operators have been handled.
+        | OptVar(s, isOpt) -> ifElse isOpt (!- "?") sepNone -- s
+        | LongIdentSet(s, e) -> !- (sprintf "%s <- " s) +> genExpr e
+        | DotIndexedGet(e, es) -> genExpr e -- "." +> sepOpenL +> genIndexedVars es +> sepCloseL
+        | DotIndexedSet(e1, es, e2) -> genExpr e1 -- ".[" +> genIndexedVars es -- "] <- " +> genExpr e2
+        | DotGet(e, s) -> genExpr e -- sprintf ".%s" s
+        | DotSet(e1, s, e2) -> genExpr e1 -- sprintf ".%s <- " s +> genExpr e2
+        | TraitCall(tps, msg, e) -> 
+            sepOpenT +> genTyparList tps +> sepColon +> sepOpenT +> genMemberSig msg +> sepCloseT 
+            +> sepSpace +> genExpr e +> sepCloseT
 
-    | LetOrUseBang(isUse, p, e1, e2) ->
-        atCurrentColumn (genComments expr +> ifElse isUse (!- "use! ") (!- "let! ") 
-            +> genPat p -- " = " +> genExpr e1 +> sepNln +> genExpr e2)
+        | LetOrUseBang(isUse, p, e1, e2) ->
+            atCurrentColumn (genComments expr +> ifElse isUse (!- "use! ") (!- "let! ") 
+                +> genPat p -- " = " +> genExpr e1 +> sepNln +> genExpr e2)
 
-    | e -> failwithf "Unexpected expression: %O" e
+        | e -> failwithf "Unexpected expression: %O" e
+    attachDirectives genExpr expr
 
 and genInfixApps newline = function
     | (s, e)::es ->

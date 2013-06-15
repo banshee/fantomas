@@ -5,6 +5,7 @@ open System
 open Microsoft.FSharp.Compiler.Range
 open Microsoft.FSharp.Compiler.Ast
 
+open Fantomas.SourceFilter
 open Fantomas.FormatConfig
 open Fantomas.SourceParser
 
@@ -119,6 +120,32 @@ let inline genCommentsAt (r : range) (ctx : Context) =
 let inline genComments e ctx =
     let r = (^T : (member Range : range) e)
     genCommentsAt r ctx
+
+/// Only print out XmlDoc if there is no annotated comment
+let genPreXmlDoc(PreXmlDoc lines) (ctx : Context) = 
+    if ctx.Comments.Count = 0 then
+        colPost sepNln sepNln lines (sprintf "///%s" >> (!-)) ctx
+    else ctx
+
+let inline attachDirectives f e (ctx : Context) = 
+    if ctx.Directives.Count = 0 then
+        f e ctx
+    else
+        let r = (^T : (member Range : range) e)
+        let exec =
+            ctx.Directives |> Seq.iter (fun (KeyValue(k, v)) -> printfn "key:%O, val:%A" k v)
+            match ctx.Directives.TryGetValue((r.StartLine, r.EndLine)) with
+            | true, If s ->
+                atIndentLevel 0 (!- (sprintf "#if %s" s))
+                +> sepNln +> f e +> sepNln
+                +> atIndentLevel 0 (!- "#endif")
+            | true, IfElse(s, ss) ->
+                atIndentLevel 0 (!- (sprintf "#if %s" s))
+                +> sepNln +> f e +> sepNln
+                // TODO: normalize indentation of ss
+                +> atIndentLevel 0 (!- "#else" +> sepNln +> col sepNln ss (!-) ++ "#endif")
+            | _ -> f e
+        exec ctx
 
 // A few active patterns for printing purpose
 

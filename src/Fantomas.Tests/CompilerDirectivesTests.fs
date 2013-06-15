@@ -21,15 +21,20 @@ let ``hash directives``() =
 
 [<Test>]
 let ``should keep compiler directives``() =
-    formatSourceString false """﻿#if INTERACTIVE
+    formatSourceString false """
+#if INTERACTIVE
 #load "../FSharpx.TypeProviders/SetupTesting.fsx"
 SetupTesting.generateSetupScript __SOURCE_DIRECTORY__
 #load "__setup__.fsx"
 #endif
-    """ config
-    |> should equal """﻿#if INTERACTIVE
+"""    config
+    |> prepend newline
+    |> should equal """
+#if INTERACTIVE
 #load "../FSharpx.TypeProviders/SetupTesting.fsx"
+
 SetupTesting.generateSetupScript __SOURCE_DIRECTORY__
+
 #load "__setup__.fsx"
 #endif"""
 

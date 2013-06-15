@@ -59,7 +59,8 @@ type ColumnIndentedTextWriter(tw : TextWriter) =
 
 [<Sealed>]
 type Context (writer : ColumnIndentedTextWriter, config : FormatConfig, 
-              ?content : string, ?positions : int [], ?comments : Dictionary<pos, string seq>) = 
+              ?content : string, ?positions : int [], 
+              ?comments : Dictionary<pos, string seq>, ?directives : Dictionary<int * int, Directive>) = 
     let mutable breakLines = true
 
     /// The original source string to query as a last resort
@@ -71,6 +72,9 @@ type Context (writer : ColumnIndentedTextWriter, config : FormatConfig,
     /// Comments attached to appropriate locations
     let comments = defaultArg comments (Dictionary())
 
+    /// Directives attached to appropriate line ranges
+    let directives = defaultArg directives (Dictionary())
+
     member __.BreakLines
         with get() = breakLines
         and set b = breakLines <- b
@@ -78,6 +82,7 @@ type Context (writer : ColumnIndentedTextWriter, config : FormatConfig,
     member __.Writer = writer
     member __.Config = config
     member __.Comments = comments
+    member __.Directives = directives
 
     /// Get source string content based on range value
     member __.StringContent(r : range) =
@@ -99,7 +104,7 @@ type Context (writer : ColumnIndentedTextWriter, config : FormatConfig,
         indentWriter.Column <- writer.Column
         /// Use infinite column width to encounter worst-case scenario
         let config = { config with PageWidth = Int32.MaxValue }
-        new Context(indentWriter, config, content, positions, comments)
+        new Context(indentWriter, config, content, positions, comments, directives)
 
     static member create config (content : string) =
         let positions = 
@@ -107,8 +112,9 @@ type Context (writer : ColumnIndentedTextWriter, config : FormatConfig,
             |> Seq.map (fun s -> String.length s + 1)
             |> Seq.scan (+) 0
             |> Seq.toArray
-        let comments = filterComments (tokenize content)
-        new Context(new ColumnIndentedTextWriter(new StringWriter()), config, content, positions, comments)
+        let (comments, directives) = collectCommentsAndDirectives content
+        new Context(new ColumnIndentedTextWriter(new StringWriter()), 
+                    config, content, positions, comments, directives)
 
     interface IDisposable with
         member __.Dispose() =
