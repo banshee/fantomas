@@ -27,7 +27,7 @@ let internal parseWith fileName content =
 
 /// Parse a source code string
 let parse fsi s = 
-    let fileName = if fsi then "/tmp.fsi" else "/tmp.fs"
+    let fileName = if fsi then "/tmp.fsi" else "/tmp.fsx"
     parseWith fileName s
 
 /// Format a source string using given config
@@ -87,7 +87,7 @@ let internal stringPos (r : range) (content : string) =
 
 /// Make a range from (startLine, startCol) to (endLine, endCol) to select some text
 let makeRange startLine startCol endLine endCol =
-    mkRange "/tmp.fs" (mkPos startLine startCol) (mkPos endLine endCol)
+    mkRange "/tmp.fsx" (mkPos startLine startCol) (mkPos endLine endCol)
 
 /// Get first non-whitespace line
 let rec internal getStartLine (lines : _ []) i =
@@ -155,8 +155,8 @@ let internal getPatch startCol (lines : string []) =
 let formatSelectionFromString fsi (r : range) (s : string) config =
     let lines = s.Split([|'\n'|], StringSplitOptions.None)
 
-    let fileName = if fsi then "/tmp.fsi" else "/tmp.fs"
-    let sourceTok = SourceTokenizer([], fileName)
+    let fileName = if fsi then "/tmp.fsi" else "/tmp.fsx"
+    let sourceTokenizer = SourceTokenizer([], fileName)
 
     /// Move to the section with real contents
     let r =
@@ -167,13 +167,13 @@ let formatSelectionFromString fsi (r : range) (s : string) config =
             /// Notice that Line indices start at 1 while Column indices start at 0.
             makeRange (startLine + 1) 0 (endLine + 1) (lines.[endLine].Length - 1)
 
-    let startTokenizer = sourceTok.CreateLineTokenizer(lines.[r.StartLine-1])
+    let startTokenizer = sourceTokenizer.CreateLineTokenizer(lines.[r.StartLine-1])
 
     let startCol = getStartCol r startTokenizer (ref 0L)
 
     let endTokenizer =
         if r.StartLine = r.EndLine then startTokenizer 
-        else sourceTok.CreateLineTokenizer(lines.[r.EndLine-1])
+        else sourceTokenizer.CreateLineTokenizer(lines.[r.EndLine-1])
 
     let endCol = getEndCol r endTokenizer (ref 0L)
     

@@ -127,24 +127,37 @@ let genPreXmlDoc(PreXmlDoc lines) (ctx : Context) =
         colPost sepNln sepNln lines (sprintf "///%s" >> (!-)) ctx
     else ctx
 
-let inline attachDirectives f e (ctx : Context) = 
-    if ctx.Directives.Count = 0 then
-        f e ctx
+let inline genBeginDirectives e (ctx : Context) = 
+    if ctx.BeginDirectives.Count = 0 then
+        ctx
     else
         let r = (^T : (member Range : range) e)
         let exec =
-            ctx.Directives |> Seq.iter (fun (KeyValue(k, v)) -> printfn "key:%O, val:%A" k v)
-            match ctx.Directives.TryGetValue((r.StartLine, r.EndLine)) with
-            | true, If s ->
-                atIndentLevel 0 (!- (sprintf "#if %s" s))
-                +> sepNln +> f e +> sepNln
-                +> atIndentLevel 0 (!- "#endif")
-            | true, IfElse(s, ss) ->
-                atIndentLevel 0 (!- (sprintf "#if %s" s))
-                +> sepNln +> f e +> sepNln
-                // TODO: normalize indentation of ss
-                +> atIndentLevel 0 (!- "#else" +> sepNln +> col sepNln ss (!-) ++ "#endif")
-            | _ -> f e
+            ctx.BeginDirectives |> Seq.iter (fun (KeyValue(k, v)) -> printfn "key:%O, val:%A" k v)
+            match ctx.BeginDirectives.TryGetValue(r.StartLine) with
+            | true, s ->
+                ctx.BeginDirectives.Remove(r.StartLine) |> ignore
+                atIndentLevel 0 (!+ "#if " -- s) +> sepNln
+            | _ -> sepNone
+        exec ctx
+
+let inline genEndDirectives e (ctx : Context) = 
+    if ctx.EndDirectives.Count = 0 then
+        ctx
+    else
+        let r = (^T : (member Range : range) e)
+        let exec =
+            ctx.EndDirectives |> Seq.iter (fun (KeyValue(k, v)) -> printfn "key:%O, val:%A" k v)
+            match ctx.EndDirectives.TryGetValue(r.EndLine) with
+            | true, EndIf ->
+                ctx.EndDirectives.Remove(r.EndLine) |> ignore
+                atIndentLevel 0 (!+ "#endif") +> sepNln
+            | true, Else ss ->
+                ctx.EndDirectives.Remove(r.EndLine) |> ignore
+                atIndentLevel 0 (!+ "#else") +> sepNln
+                +> col sepNln ss (!-) 
+                +> atIndentLevel 0 (!+ "#endif") +> sepNln
+            | _ -> sepNone
         exec ctx
 
 // A few active patterns for printing purpose

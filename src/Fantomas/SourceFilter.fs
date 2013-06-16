@@ -21,11 +21,6 @@
 //  4. Find first comment token, go backwards until we find a token of another kind (except whitespace tokens).
 //  5. If found no comment token, no entry will be created.
 //  6. Add blocks of comments into a map keyed by locations of keyword tokens.
-// 
-// Compiler directives need more thorough treatments.
-// Some hindrances are (1) They may or may not have an else branch (2) They can be nested.
-// Compiler directives can be looked up by line numbers.
-// The problem is to associate line numbers with the AST.
 
 open System
 open System.Text
@@ -52,12 +47,12 @@ type Token =
 let tokenize (s : string) =
     let lines = s.Split([|'\n'|], StringSplitOptions.None)
 
-    let fileName = "/tmp.fs"
-    let sourceTok = SourceTokenizer([], fileName)
+    let fileName = "/tmp.fsx"
+    let sourceTokenizer = SourceTokenizer([], fileName)
 
     [| let state = ref 0L
        for n, line in lines |> Seq.zip [1..lines.Length] do
-           let tokenizer = sourceTok.CreateLineTokenizer(line)
+           let tokenizer = sourceTokenizer.CreateLineTokenizer(line)
            let rec parseLine() = seq {
               match tokenizer.ScanToken(!state) with
               | Some(tok), nstate ->
@@ -188,6 +183,22 @@ let filterComments xss =
     let xs = Array.concat xss
     loop (xs.Length-1) xs (Dictionary())
 
+// 
+// Compiler directives need more thorough treatments.
+// Some hindrances are (1) They may or may not have an else branch (2) They can be nested.
+// Compiler directives can be looked up by line numbers.
+// The problem is to associate line numbers with the AST.
+//
+// Tentation solution (currently assume that directives are non-nested):
+//  1. Traverse tokens on line-by-line basis
+//  2. Find the first line with #if token (skipping whitespaces)
+//  3. Find matching #else or #endif token
+//  4. Construct directives with necessary information (see Directive type below)
+//  5. Attach begins of directives and ends of directives to their corresponding line numbers
+//  6. On a line of ASTs, either attach begin directives before the line or end directives after the line
+//  7. Beware of unmatched directives (since we can't print begins and ends at the same time).
+//
+
 /// Neccessary information for reconstructing compiler directives
 type Directive =
     // #if <string> ... #endif
@@ -266,16 +277,29 @@ let (|Directive|_|) = function
         Some(((start, finish), IfElse(s, mergeTokens tss)), xss)
     | _ -> None
 
+type DirectiveInfo =
+    | EndIf
+    | Else of string seq
+
 /// Get all directives and attach them to appropriate line numbers
 let filterDirectives xss =
-    let rec loop (xss : Token [] []) (dic : Dictionary<_, _>)  = 
+    let rec loop (xss : Token [] []) (beginDic : Dictionary<_, _>) (endDic : Dictionary<_, _>) = 
         match xss with
-        | Directive((r, d), xss)
-        | CodeBlock(_, Directive((r, d), xss)) -> 
-            dic.Add(r, d)
-            loop xss dic
-        | _ -> dic
-    loop xss (Dictionary())
+        | Directive(((start, finish), d), xss)
+        | CodeBlock(_, Directive(((start, finish), d), xss)) -> 
+            match d with
+            | If s ->
+                beginDic.Add(start, s)
+                endDic.Add(finish, EndIf)
+            | IfElse(s, ss) ->
+                beginDic.Add(start, s)
+                endDic.Add(finish, Else ss)
+            loop xss beginDic endDic
+        | _ -> 
+            Seq.iter (fun (KeyValue(k, v)) -> printfn "key:%O, value:%O" k v) beginDic
+            Seq.iter (fun (KeyValue(k, v)) -> printfn "key:%O, value:%O" k v) endDic
+            (beginDic, endDic)
+    loop xss (Dictionary()) (Dictionary())
 
 let collectCommentsAndDirectives s =
     let tokens = tokenize s

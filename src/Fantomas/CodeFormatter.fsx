@@ -15,26 +15,28 @@ let config = FormatConfig.Default
 
 let t01 = """
 #if INTERACTIVE
-#load "../FSharpx.TypeProviders/SetupTesting.fsx"
-SetupTesting.generateSetupScript __SOURCE_DIRECTORY__
-#load "__setup__.fsx"
+module Test =
+    #load "../FSharpx.TypeProviders/SetupTesting.fsx"
+    SetupTesting.generateSetupScript __SOURCE_DIRECTORY__
+    #load "__setup__.fsx"
 #endif
 """
 
 let t02 = """
-try 
-    fst(find (fun (s, (s', ty)) -> 
-                s' = s0 && can (type_match ty ty0) []) (!the_interface))
-with
-| Failure _ -> s0
+#if COMPILED
+printfn "../FSharpx.TypeProviders/SetupTesting.fsx"
+
+SetupTesting.generateSetupScript "aa"
+
+printfn "__setup__.fsx"
+#else
+#endif
 """
 ;;
 
-let xs = tokenize t01
+let xs = tokenize t02
 let ys = filterComments xs
          |> Seq.iter (fun (KeyValue(pos, s)) -> printfn "l:%O, c:%O, %A" pos.Line pos.Column s);;
-let zs = filterDirectives xs
-         |> Seq.iter (fun (KeyValue(k, v)) -> printfn "key:%O, val:%A" k v);;
 
 printfn "Result:\n%s" <| formatSourceString false t01 config;;
 

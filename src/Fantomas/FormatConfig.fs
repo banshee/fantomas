@@ -59,8 +59,8 @@ type ColumnIndentedTextWriter(tw : TextWriter) =
 
 [<Sealed>]
 type Context (writer : ColumnIndentedTextWriter, config : FormatConfig, 
-              ?content : string, ?positions : int [], 
-              ?comments : Dictionary<pos, string seq>, ?directives : Dictionary<int * int, Directive>) = 
+              ?content : string, ?positions : int [], ?comments : Dictionary<pos, string seq>, 
+              ?beginDirectives : Dictionary<int, string>, ?endDirectives : Dictionary<int, DirectiveInfo>) = 
     let mutable breakLines = true
 
     /// The original source string to query as a last resort
@@ -73,7 +73,8 @@ type Context (writer : ColumnIndentedTextWriter, config : FormatConfig,
     let comments = defaultArg comments (Dictionary())
 
     /// Directives attached to appropriate line ranges
-    let directives = defaultArg directives (Dictionary())
+    let beginDirectives = defaultArg beginDirectives (Dictionary())
+    let endDirectives = defaultArg endDirectives (Dictionary())
 
     member __.BreakLines
         with get() = breakLines
@@ -82,7 +83,8 @@ type Context (writer : ColumnIndentedTextWriter, config : FormatConfig,
     member __.Writer = writer
     member __.Config = config
     member __.Comments = comments
-    member __.Directives = directives
+    member __.BeginDirectives = beginDirectives
+    member __.EndDirectives = endDirectives
 
     /// Get source string content based on range value
     member __.StringContent(r : range) =
@@ -104,7 +106,7 @@ type Context (writer : ColumnIndentedTextWriter, config : FormatConfig,
         indentWriter.Column <- writer.Column
         /// Use infinite column width to encounter worst-case scenario
         let config = { config with PageWidth = Int32.MaxValue }
-        new Context(indentWriter, config, content, positions, comments, directives)
+        new Context(indentWriter, config, content, positions, comments, beginDirectives, endDirectives)
 
     static member create config (content : string) =
         let positions = 
@@ -112,9 +114,9 @@ type Context (writer : ColumnIndentedTextWriter, config : FormatConfig,
             |> Seq.map (fun s -> String.length s + 1)
             |> Seq.scan (+) 0
             |> Seq.toArray
-        let (comments, directives) = collectCommentsAndDirectives content
+        let (comments, (beginDirectives, endDirectives)) = collectCommentsAndDirectives content
         new Context(new ColumnIndentedTextWriter(new StringWriter()), 
-                    config, content, positions, comments, directives)
+                    config, content, positions, comments, beginDirectives, endDirectives)
 
     interface IDisposable with
         member __.Dispose() =

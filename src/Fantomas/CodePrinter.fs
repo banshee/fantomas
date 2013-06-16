@@ -27,7 +27,7 @@ and genModuleOrNamespace mn =
         +> ifElse (s = "Tmp") sepNone (ifElse isModule (!- "module ") (!- "namespace ")
                 +> opt sepSpace ao genAccess +> ifElse (s = "") (!- "global") (!- s) +> rep 2 sepNln)
         +> genModuleDeclList mds
-    attachDirectives genModuleOrNamespace mn
+    genBeginDirectives mn +> genModuleOrNamespace mn +> genEndDirectives mn
 
 and genSigModuleOrNamespace(SigModuleOrNamespace(ats, px, ao, s, mds, isModule, r)) =
     ifElse (s = "Tmp") sepNone (genCommentsAt r +> genPreXmlDoc px)
@@ -87,7 +87,7 @@ and genModuleDecl md =
             genTypeDefn true t +> colPre (rep 2 sepNln) (rep 2 sepNln) ts (genTypeDefn false)
         | md ->
             failwithf "Unexpected module declaration: %O" md
-    attachDirectives (fun md -> genComments md +> genModuleDecl md) md
+    genBeginDirectives md +> genComments md +> genModuleDecl md +> genEndDirectives md
 
 and genSigModuleDecl md = 
     let rec genSigModuleDec = function
@@ -426,7 +426,7 @@ and genExpr expr =
                 +> genPat p -- " = " +> genExpr e1 +> sepNln +> genExpr e2)
 
         | e -> failwithf "Unexpected expression: %O" e
-    attachDirectives genExpr expr
+    genBeginDirectives expr +> genExpr expr +> genEndDirectives expr
 
 and genInfixApps newline = function
     | (s, e)::es ->
