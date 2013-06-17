@@ -45,7 +45,7 @@ type Token =
 
 /// Return a list of tokens with line and column information
 let tokenize (s : string) =
-    let lines = s.Split([|'\n'|], StringSplitOptions.None)
+    let lines = s.Replace("\r\n","\n").Split('\r', '\n')
 
     let fileName = "/tmp.fsx"
     let sourceTokenizer = SourceTokenizer([], fileName)

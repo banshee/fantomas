@@ -28,7 +28,6 @@ SetupTesting.generateSetupScript __SOURCE_DIRECTORY__
 #load "__setup__.fsx"
 #endif
 """    config
-    |> prepend newline
     |> should equal """
 #if INTERACTIVE
 #load "../FSharpx.TypeProviders/SetupTesting.fsx"
@@ -36,7 +35,8 @@ SetupTesting.generateSetupScript __SOURCE_DIRECTORY__
 SetupTesting.generateSetupScript __SOURCE_DIRECTORY__
 
 #load "__setup__.fsx"
-#endif"""
+#endif
+"""
 
 [<Test>]
 let ``line, file and path identifiers``() =

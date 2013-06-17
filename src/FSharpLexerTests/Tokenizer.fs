@@ -3,21 +3,25 @@
 open System
 open Microsoft.FSharp.Compiler.SourceCodeServices
 
-let tokenize (s : string) =
-    let lines = s.Split([|'\n'|], StringSplitOptions.None)
+type Token = 
+   | EOL
+   | Token of TokenInformation
 
-    let fileName = "tmp.fsx"
-    let sourceTok = SourceTokenizer([], fileName)
-
-    [| let state = ref 0L
-       for n, line in lines |> Seq.zip [1..lines.Length] do
-           let tokenizer = sourceTok.CreateLineTokenizer(line)
-           let rec parseLine() = seq {
-              match tokenizer.ScanToken(!state) with
-              | Some(tok), nstate ->
-                  let str = line.Substring(tok.LeftColumn, tok.RightColumn - tok.LeftColumn + 1)
-                  yield (str, tok, n)
-                  state := nstate
-                  yield! parseLine()
-              | None, nstate -> state := nstate }
-           yield! parseLine() |]
+let tokenize (content:string) = 
+    // Create an interactive checker instance (ignore notifications)
+    seq { let sourceTokenizer = SourceTokenizer([ ], "/tmp.fsx")
+          let lines = content.Replace("\r\n","\n").Split('\r', '\n')
+          let lexState = ref 0L
+          for line in lines do 
+              let lineTokenizer = sourceTokenizer.CreateLineTokenizer line
+              let finLine = ref false
+              while not finLine.Value do
+                  let tok, newLexState = lineTokenizer.ScanToken(lexState.Value)
+                  lexState := newLexState
+                  match tok with 
+                  | None -> 
+                      yield (EOL, System.Environment.NewLine) // new line
+                      finLine := true
+                  | Some t -> 
+                      yield (Token t, line.[t.LeftColumn..t.RightColumn]) }
+    |> Seq.toArray
